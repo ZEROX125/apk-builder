@@ -33,15 +33,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Remove old apktool
         run: |
           sudo rm -f /usr/bin/apktool /usr/bin/apktool.jar
           sudo rm -f /usr/local/bin/apktool /usr/local/bin/apktool.jar
-          sudo rm -f /usr/share/apktool/apktool.jar
-          which apktool || echo "apktool removed successfully"
+          which apktool || echo "apktool removed"
 
       - name: Install tools
         run: |
@@ -49,19 +45,16 @@ jobs:
           sudo apt-get install -y zipalign wget unzip
           wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar -O apktool.jar
           ls -lh apktool.jar
-          echo "APKTOOL_PATH=$(pwd)/apktool.jar" >> $GITHUB_ENV
 
       - name: Download template
         run: |
           curl -L -o template.apk "${{ secrets.TEMPLATE_URL }}"
           ls -lh template.apk
-          file template.apk
 
       - name: Decode APK
         run: |
-          java -jar apktool.jar d -f template.apk -o work --use-aapt2
-          ls -la work/ | head -20
-          echo "=== strings.xml ==="
+          java -jar apktool.jar d -f template.apk -o work
+          ls -la work/
           cat work/res/values/strings.xml
 
       - name: Modify strings
@@ -90,13 +83,12 @@ jobs:
           with open(path, 'w', encoding='utf-8') as f:
               f.write(content)
 
-          print("=== Modified strings.xml ===")
           print(content)
           EOF
 
       - name: Rebuild APK
         run: |
-          java -jar apktool.jar b work -o output.apk --use-aapt2
+          java -jar apktool.jar b work -o output.apk
           ls -lh output.apk
 
       - name: Generate keystore
@@ -111,13 +103,17 @@ jobs:
 
       - name: Sign APK
         run: |
-          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | tail -1)
-          echo "Using build tools: $BUILD_TOOLS"
-          $BUILD_TOOLS/apksigner sign \
-            --ks key.jks \
-            --ks-pass pass:zerox123 \
-            --key-pass pass:zerox123 \
-            output.apk
+          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* 2>/dev/null | tail -1)
+          echo "Build tools: $BUILD_TOOLS"
+          if [ -z "$BUILD_TOOLS" ]; then
+            echo "No build tools, skipping sign"
+          else
+            $BUILD_TOOLS/apksigner sign \
+              --ks key.jks \
+              --ks-pass pass:zerox123 \
+              --key-pass pass:zerox123 \
+              output.apk
+          fi
           ls -lh output.apk
 
       - name: Send to Telegram
