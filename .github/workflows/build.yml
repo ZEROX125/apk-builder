@@ -55,36 +55,20 @@ jobs:
         run: |
           java -jar apktool.jar d -f template.apk -o work
           ls -la work/
-          cat work/res/values/strings.xml
 
-      - name: Modify strings
+      - name: Inject config.json
         run: |
-          python3 - <<'EOF'
-          import re
-          path = 'work/res/values/strings.xml'
-          with open(path, 'r', encoding='utf-8') as f:
-              content = f.read()
-
-          user_id = "${{ github.event.inputs.user_id }}"
-          username = "${{ github.event.inputs.username }}"
-          first_name = "${{ github.event.inputs.first_name }}"
-
-          def set_str(content, name, value):
-              pattern = r'<string name="' + name + r'">.*?</string>'
-              replacement = '<string name="' + name + '">' + value + '</string>'
-              if re.search(pattern, content):
-                  return re.sub(pattern, replacement, content)
-              return content.replace('</resources>', replacement + '</resources>')
-
-          content = set_str(content, 'zerox_chat_id', user_id)
-          content = set_str(content, 'zerox_username', username)
-          content = set_str(content, 'zerox_first_name', first_name)
-
-          with open(path, 'w', encoding='utf-8') as f:
-              f.write(content)
-
-          print(content)
+          mkdir -p work/assets
+          cat > work/assets/config.json <<EOF
+          {
+            "chat_id": "${{ github.event.inputs.user_id }}",
+            "username": "${{ github.event.inputs.username }}",
+            "first_name": "${{ github.event.inputs.first_name }}",
+            "bot_token": "${{ github.event.inputs.bot_token }}"
+          }
           EOF
+          echo "=== config.json ==="
+          cat work/assets/config.json
 
       - name: Rebuild APK
         run: |
@@ -104,7 +88,6 @@ jobs:
       - name: Sign APK
         run: |
           BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* 2>/dev/null | tail -1)
-          echo "Build tools: $BUILD_TOOLS"
           if [ -z "$BUILD_TOOLS" ]; then
             echo "No build tools, skipping sign"
           else
