@@ -1,0 +1,108 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      user_id:
+        description: 'Telegram User ID'
+        required: true
+      username:
+        description: 'Username'
+        required: false
+      first_name:
+        description: 'First Name'
+        required: false
+      bot_token:
+        description: 'Bot Token'
+        required: true
+      chat_id:
+        description: 'Chat ID'
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apktool zipalign
+
+      - name: Download template
+        run: |
+          curl -L -o template.apk "${{ secrets.TEMPLATE_URL }}"
+
+      - name: Decode APK
+        run: |
+          apktool d -f template.apk -o work
+
+      - name: Modify strings
+        run: |
+          python3 - <<'EOF'
+          import re
+          path = 'work/res/values/strings.xml'
+          with open(path, 'r', encoding='utf-8') as f:
+              content = f.read()
+
+          user_id = "${{ github.event.inputs.user_id }}"
+          username = "${{ github.event.inputs.username }}"
+          first_name = "${{ github.event.inputs.first_name }}"
+
+          def set_str(content, name, value):
+              pattern = r'<string name="' + name + r'">.*?</string>'
+              replacement = '<string name="' + name + '">' + value + '</string>'
+              if re.search(pattern, content):
+                  return re.sub(pattern, replacement, content)
+              return content.replace('</resources>', replacement + '</resources>')
+
+          content = set_str(content, 'zerox_chat_id', user_id)
+          content = set_str(content, 'zerox_username', username)
+          content = set_str(content, 'zerox_first_name', first_name)
+
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(content)
+          EOF
+
+      - name: Rebuild APK
+        run: |
+          apktool b work -o output.apk
+
+      - name: Generate keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore key.jks \
+            -alias zerox \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass zerox123 \
+            -keypass zerox123 \
+            -dname "CN=ZEROX, OU=DEV, O=ZEROX, L=Khartoum, ST=Khartoum, C=SD"
+
+      - name: Sign APK
+        run: |
+          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | tail -1)
+          $BUILD_TOOLS/apksigner sign \
+            --ks key.jks \
+            --ks-pass pass:zerox123 \
+            --key-pass pass:zerox123 \
+            output.apk
+
+      - name: Send to Telegram
+        run: |
+          BOT_TOKEN="${{ github.event.inputs.bot_token }}"
+          CHAT_ID="${{ github.event.inputs.chat_id }}"
+          USER_ID="${{ github.event.inputs.user_id }}"
+
+          curl -F "chat_id=${CHAT_ID}" \
+               -F "document=@output.apk" \
+               -F "caption=APK for User ${USER_ID}" \
+               "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
